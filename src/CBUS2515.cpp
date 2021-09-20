@@ -62,6 +62,19 @@ CBUS2515::CBUS2515() {
   _osc_freq = OSCFREQ;
 }
 
+CBUS2515::CBUS2515(CBUSConfig & config)
+  : CBUSbase(config)
+{
+  _num_rx_buffers = NUM_RX_BUFFS;
+  _num_tx_buffers = NUM_TX_BUFFS;
+  eventhandler = NULL;
+  eventhandlerex = NULL;
+  framehandler = NULL;
+  _csPin = MCP2515_CS;
+  _intPin = MCP2515_INT;
+  _osc_freq = OSCFREQ;
+}
+
 //
 /// initialise the CAN controller and buffers, and attach the ISR
 /// default poll arg is set to false, so as not to break existing code

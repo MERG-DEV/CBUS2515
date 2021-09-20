@@ -63,6 +63,7 @@ class CBUS2515 : public CBUSbase {
 public:
 
   CBUS2515();
+  CBUS2515(CBUSConfig &);
 
   // these methods are declared virtual in the base class and must be implemented by the derived class
   bool begin(bool poll = false, SPIClass spi = SPI);    // note default args
