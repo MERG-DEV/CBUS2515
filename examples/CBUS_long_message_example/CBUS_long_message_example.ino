@@ -57,33 +57,40 @@
 #include <cbusdefs.h>               // MERG CBUS constants
 
 // constants
-const byte VER_MAJ = 1;                  // code major version
-const char VER_MIN = 'a';                // code minor version
-const byte VER_BETA = 0;                 // code beta sub-version
-const byte MODULE_ID = 99;               // CBUS module type
+const byte VER_MAJ = 1;             // code major version
+const char VER_MIN = 'a';           // code minor version
+const byte VER_BETA = 0;            // code beta sub-version
+const byte MODULE_ID = 97;          // CBUS module type
 
-const byte LED_GRN = 4;                  // CBUS green SLiM LED pin
-const byte LED_YLW = 5;                  // CBUS yellow FLiM LED pin
-const byte SWITCH0 = 6;                  // CBUS push button switch pin
+const byte LED_GRN = 4;             // CBUS green SLiM LED pin
+const byte LED_YLW = 5;             // CBUS yellow FLiM LED pin
+const byte SWITCH0 = 6;             // CBUS push button switch pin
 
 // CBUS objects
 CBUS2515 CBUS;                      // CBUS object
 CBUSConfig config;                  // configuration object
 CBUSLED ledGrn, ledYlw;             // two LED objects
 CBUSSwitch pb_switch;               // switch object
+CBUSLongMessage lmsg(&CBUS);        // CBUS RFC0005 long message object
 
 // module name, must be 7 characters, space padded.
-unsigned char mname[7] = { 'E', 'M', 'P', 'T', 'Y', ' ', ' ' };
+unsigned char mname[7] = { 'L', 'M', 'S', 'G', 'E', 'X', ' ' };
 
 // forward function declarations
 void eventhandler(byte index, byte opc);
 void framehandler(CANFrame *msg);
+void longmessagehandler(void *fragment, const unsigned int fragment_len, const byte stream_id, const byte status);
+
+// long message variables
+byte streams[] = {1, 2, 3};         // streams to subscribe to
+char lmsg_out[32], lmsg_in[32];     // message buffers
 
 //
 /// setup CBUS - runs once at power on from setup()
 //
-void setupCBUS()
-{
+
+void setupCBUS() {
+
   // set config layout parameters
   config.EE_NVS_START = 10;
   config.EE_NUM_NVS = 10;
@@ -134,13 +141,16 @@ void setupCBUS()
   // register our CAN frame handler, to receive *every* CAN frame
   CBUS.setFrameHandler(framehandler);
 
+  // subscribe to long message streams and register our handler function
+  lmsg.subscribe(streams, sizeof(streams) / sizeof(byte), lmsg_in, 32, longmessagehandler);
+
   // set CBUS LEDs to indicate the current mode
   CBUS.indicateMode(config.FLiM);
 
   // configure and start CAN bus and CBUS message processing
-  CBUS.setNumBuffers(2, 1);      // more buffers = more memory used, fewer = less
-  CBUS.setOscFreq(16000000UL);   // select the crystal frequency of the CAN module
-  CBUS.setPins(10, 2);           // select pins for CAN bus CE and interrupt connections
+  CBUS.setNumBuffers(4, 2);         // more buffers = more memory used, fewer = less
+  CBUS.setOscFreq(16000000UL);      // select the crystal frequency of the CAN module
+  CBUS.setPins(10, 2);              // select pins for CAN bus CE and interrupt connections
   CBUS.begin();
 }
 
@@ -148,10 +158,10 @@ void setupCBUS()
 /// setup - runs once at power on
 //
 
-void setup()
-{
+void setup() {
+
   Serial.begin (115200);
-  Serial << endl << endl << F("> ** CBUS Arduino basic example module ** ") << __FILE__ << endl;
+  Serial << endl << endl << F("> ** CBUS Arduino long message example module ** ") << __FILE__ << endl;
 
   setupCBUS();
 
@@ -172,6 +182,14 @@ void loop() {
   CBUS.process();
 
   //
+  /// do RFC0005 CBUS long message processing
+  //
+
+  if (!lmsg.process()) {
+    Serial << F("> error in long message processing") << endl;
+  }
+
+  //
   /// process console commands
   //
 
@@ -181,7 +199,7 @@ void loop() {
   /// check CAN message buffers
   //
 
-  if (CBUS.canp->CBUS.canp->receiveBufferPeakCount() > CBUS.canp->receiveBufferSize()) {
+  if (CBUS.canp->receiveBufferPeakCount() > CBUS.canp->receiveBufferSize()) {
     Serial << F("> receive buffer overflow") << endl;
   }
 
@@ -193,8 +211,10 @@ void loop() {
   /// check CAN bus state
   //
 
-  if ((byte s = CBUS.canp->errorFlagRegister()) != 0) {
-    Serial << F("> error flag register is non-zero") << endl;
+  byte err;
+
+  if ((err = CBUS.canp->errorFlagRegister()) != 0) {
+    Serial << F("> error flag register = ") << err << endl;
   }
 
   //
@@ -234,6 +254,23 @@ void framehandler(CANFrame *msg) {
   }
 
   Serial << " ]" << endl;
+  return;
+}
+
+//
+/// long message receive handler function
+/// called once the user buffer is full, or the message has been completely received
+//
+
+void longmessagehandler(void *fragment, const unsigned int fragment_len, const byte stream_id, const byte status) {
+
+  // display the message
+  // this will be the complete message if shorter than the provided buffer, or the final fragment if longer
+
+  if (status == CBUS_LONG_MESSAGE_COMPLETE) {
+    Serial << F("> received long message, stream = ") << stream_id << F(", len = ") << fragment_len << F(", msg = |") << (char *) fragment << F("|") << endl;
+  }
+
   return;
 }
 
@@ -368,6 +405,17 @@ void processSerialInput(void) {
     case 'm':
       // free memory
       Serial << F("> free SRAM = ") << config.freeSRAM() << F(" bytes") << endl;
+      break;
+
+    case 'l':
+      // send a long message with stream ID = 2
+      uev = Serial.readBytesUntil('\n', lmsg_out, 32);
+      lmsg.sendLongMessage(lmsg_out, uev, 2);
+      break;
+
+    case 'd':
+      Serial << F("> tx buffer = ") << CBUS.canp->transmitBufferSize(0) << F(", ") <<  CBUS.canp->transmitBufferCount(0) << F(", ") << CBUS.canp->transmitBufferPeakCount(0) << endl;
+      Serial << F("> rx buffer = ") << CBUS.canp->receiveBufferSize() << F(", ") << CBUS.canp->receiveBufferCount() << F(", ") << CBUS.canp->receiveBufferPeakCount() << endl;
       break;
 
     case '\r':

@@ -44,58 +44,69 @@
 // CBUS MCP2515 library
 #include <CBUS2515.h>
 
-// CAN bus controller specific object - for MCP2515/25625
-ACAN2515 *can;
+// globals
+ACAN2515 *can;    // CAN bus controller specific object - for MCP2515/25625
 
 //
 /// constructor
 //
 
 CBUS2515::CBUS2515() {
-  numbuffers = NUM_RECV_BUFFS;
+  _num_rx_buffers = NUM_RX_BUFFS;
+  _num_tx_buffers = NUM_TX_BUFFS;
   eventhandler = NULL;
+  eventhandlerex = NULL;
   framehandler = NULL;
   _csPin = MCP2515_CS;
   _intPin = MCP2515_INT;
-  _osc_freq = 16000000UL;
+  _osc_freq = OSCFREQ;
 }
 
 //
 /// initialise the CAN controller and buffers, and attach the ISR
+/// default poll arg is set to false, so as not to break existing code
 //
 
-bool CBUS2515::begin(void) {
+bool CBUS2515::begin(bool poll, SPIClass spi) {
 
   uint16_t ret;
+  bool retval = false;
 
   _numMsgsSent = 0;
   _numMsgsRcvd = 0;
+  _poll = poll;
 
-  ACAN2515Settings settings(_osc_freq, canbitrate);
+  ACAN2515Settings settings(_osc_freq, CANBITRATE);
 
   settings.mRequestedMode = ACAN2515Settings::NormalMode;
-  settings.mReceiveBufferSize = numbuffers;
-  settings.mTransmitBuffer0Size = 0;
+  settings.mReceiveBufferSize = _num_rx_buffers;
+  settings.mTransmitBuffer0Size = _num_tx_buffers;
   settings.mTransmitBuffer1Size = 0;
   settings.mTransmitBuffer2Size = 0;
 
   // start SPI
-  SPI.begin();
+  spi.begin();
 
   // instantiate CAN bus object
-  can = new ACAN2515(_csPin, SPI, _intPin);
-  canp = can;
-
-  // Serial << F("> initialising CAN controller") << endl;
-  ret = can->begin(settings, [] {can->isr();});
+  // if in polling mode, the interrupt pin and ISR not used
+  if (_poll) {
+    can = new ACAN2515(_csPin, spi, 255);
+    ret = can->begin(settings, NULL);
+  } else {
+    can = new ACAN2515(_csPin, spi, _intPin);
+    ret = can->begin(settings, [] {can->isr();});
+  }
 
   if (ret == 0) {
     // Serial << F("> CAN controller initialised ok") << endl;
-    return true;
+    // save pointer to CAN object so the user can access other parts of the library API
+    canp = can;
+    retval = true;
   } else {
-    Serial << F("> error initialising CAN controller, error code = ") << ret << endl;
-    return false;
+    // Serial << F("> error initialising CAN controller, error code = ") << ret << endl;
   }
+
+  return retval;
 }
 
 //
@@ -103,18 +114,24 @@ bool CBUS2515::begin(void) {
 //
 
 bool CBUS2515::available(void) {
-  return (can->available());
+
+  if (_poll) {            // not using interrupts, so poll the interrupt register
+    canp->poll();
+  }
+
+  return (canp->available());
 }
 
 //
 /// get next unprocessed message from the buffer
+/// must call available first to ensure there is something to get
 //
 
 CANFrame CBUS2515::getNextMessage(void) {
 
-  CANMessage message;
+  CANMessage message;       // ACAN2515 frame class
 
-  can->receive(message);
+  canp->receive(message);
 
   _msg.id = message.id;
   _msg.len = message.len;
@@ -130,23 +147,26 @@ CANFrame CBUS2515::getNextMessage(void) {
 /// send a CBUS message
 //
 
-bool CBUS2515::sendMessage(CANFrame *msg, bool rtr, bool ext) {
+bool CBUS2515::sendMessage(CANFrame *msg, bool rtr, bool ext, byte priority) {
 
   // caller must populate the message data
   // this method will create the correct frame header (CAN ID and priority bits)
   // rtr and ext default to false unless arguments are supplied - see method definition in .h
+  // priority defaults to 1011 low/medium
 
-  CANMessage message;
+  CANMessage message;       // ACAN2515 frame class
+  bool ret = false;
 
-  makeHeader(msg);
+  makeHeader(msg, priority);                      // default priority unless user overrides
   message.id = msg->id;
   message.len = msg->len;
   message.rtr = rtr;
   message.ext = ext;
   memcpy(message.data, msg->data, msg->len);
 
-  _numMsgsSent++;
-  return can->tryToSend(message);
+  ret = canp->tryToSend(message);
+  _numMsgsSent += ret;
+  return ret;
 }
 
 //
@@ -157,7 +177,8 @@ void CBUS2515::printStatus(void) {
 
   Serial << F("> CBUS status:");
   Serial << F(" messages received = ") << _numMsgsRcvd << F(", sent = ") << _numMsgsSent << F(", receive errors = ") << \
-         can->receiveErrorCounter() << F(", transmit errors = ") << can->transmitErrorCounter() << endl;
+         canp->receiveErrorCounter() << F(", transmit errors = ") << canp->transmitErrorCounter() << F(", error flag = ") \
+         << canp->errorFlagRegister() << endl;
   return;
 }
 
@@ -166,7 +187,7 @@ void CBUS2515::printStatus(void) {
 //
 
 void CBUS2515::reset(void) {
-  can->end();
+  canp->end();
   delete can;
   begin();
 }
@@ -185,8 +206,9 @@ void CBUS2515::setPins(byte csPin, byte intPin) {
 /// this can be tuned according to bus load and available memory
 //
 
-void CBUS2515::setNumBuffers(byte num) {
-  numbuffers = num;
+void CBUS2515::setNumBuffers(byte num_rx_buffers, byte num_tx_buffers) {
+  _num_rx_buffers = num_rx_buffers;
+  _num_tx_buffers = num_tx_buffers;
 }
 
 //
