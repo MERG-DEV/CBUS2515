@@ -77,9 +77,9 @@ void CBUS2515::initMembers() {
 //
 
 #ifdef ARDUINO_ARCH_RP2040
-bool CBUS2515::begin(bool poll, SPIClassRP2040 spi)
+bool CBUS2515::begin(bool poll, SPIClassRP2040 & spi)
 #else
-bool CBUS2515::begin(bool poll, SPIClass spi)
+bool CBUS2515::begin(bool poll, SPIClass & spi)
 #endif
 {
   uint16_t ret;
