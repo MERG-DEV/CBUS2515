@@ -181,24 +181,40 @@ bool CBUS2515::sendMessage(CANFrame *msg, bool rtr, bool ext, byte priority) {
   // rtr and ext default to false unless arguments are supplied - see method definition in .h
   // priority defaults to 1011 low/medium
 
-  CANMessage message;       // ACAN2515 frame class
   bool ret = false;
 
+  msg->rtr = rtr;
+  msg->ext = ext;
   makeHeader(msg, priority);                      // default priority unless user overrides
-  message.id = msg->id;
-  message.len = msg->len;
-  message.rtr = rtr;
-  message.ext = ext;
-  memcpy(message.data, msg->data, msg->len);
 
-  ret = canp->tryToSend(message);
+  ret = sendMessageNoUpdate(msg);
   _numMsgsSent += ret;
 
   if (UI) {
     _ledGrn.pulse();
   }
 
+  // call user transmit handler
+  if (transmithandler != nullptr) {
+    (void)(*transmithandler)(msg);
+  }
+
   return ret;
+}
+
+//
+///
+//
+
+bool CBUS2515::sendMessageNoUpdate(CANFrame *msg) {
+
+  CANMessage message;       // ACAN2515 frame class
+
+  message.id = msg->id;
+  message.len = msg->len;
+  memcpy(message.data, msg->data, msg->len);
+
+  return (canp->tryToSend(message));
 }
 
 //

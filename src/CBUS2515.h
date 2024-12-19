@@ -74,6 +74,7 @@ public:
   bool available(void);
   CANFrame getNextMessage(void);
   bool sendMessage(CANFrame *msg, bool rtr = false, bool ext = false, byte priority = DEFAULT_PRIORITY);    // note default arguments
+  bool sendMessageNoUpdate(CANFrame *msg);
   void reset(void);
 
   // these methods are specific to this implementation
