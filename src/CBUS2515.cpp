@@ -212,7 +212,12 @@ bool CBUS2515::sendMessageNoUpdate(CANFrame *msg) {
 
   message.id = msg->id;
   message.len = msg->len;
+  message.rtr = msg->rtr;
+  message.ext = msg->ext;
+
   memcpy(message.data, msg->data, msg->len);
+
+  ++_numMsgsSent;
 
   return (canp->tryToSend(message));
 }
